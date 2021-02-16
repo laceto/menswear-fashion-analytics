@@ -47,8 +47,6 @@ tab_freq <- fluidPage(
         column(3,
                DTOutput("database_bigrams"),
                verbatimTextOutput('row_selected_bigram')
-               # ,
-               # plotOutput("plot_frequencies")
                ),
         column(3,
                DTOutput("database_brand_bigram_selected"),
@@ -57,11 +55,6 @@ tab_freq <- fluidPage(
         column(3, 
                DTOutput("brand_selected_show"),
                style = "height:500px; overflow-y: scroll;overflow-x: scroll;"
-               # hr(),
-               # hr(),
-               # verbatimTextOutput("brand_selected_show"),
-               # tags$head(tags$style("#brand_selected_show{font-size:12px; font-style:italic; overflow-x:scroll; height:180px; background: ghostwhite;}"))
-               # tags$head(tags$style("#brand_selected_show{color:red; font-size:12px; font-style:italic; overflow-y:scroll; max-height: 500px; background: ghostwhite;}"))
                )
         )
     )
@@ -174,16 +167,6 @@ server <- function(input, output, session) {
         )
     })
 
-    # output$plot_frequencies <- renderPlot({
-    #     tidy_books %>%
-    #         dplyr::count(word, sort = TRUE) %>%
-    #         dplyr::top_n(input$top_freq) %>%
-    #         dplyr::mutate(word = reorder(word, n)) %>%
-    #         ggplot2::ggplot(aes(n, word)) +
-    #         ggplot2::geom_col() +
-    #         ggplot2::labs(y = NULL)
-    # })
-    
     database_bigrams <- reactive({
         word1_selected <- frequencies() %>% dplyr::select(word) %>% dplyr::slice(word_selected()) %>% unlist
 
@@ -194,7 +177,7 @@ server <- function(input, output, session) {
     })
 
     datatable_database_bigrams <- reactive({
-        # word1_selected <- frequencies() %>% dplyr::select(word) %>% dplyr::slice(word_selected()) %>% unlist
+
         datatable(
             database_bigrams(),
             selection = "single",
