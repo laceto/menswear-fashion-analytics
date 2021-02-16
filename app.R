@@ -40,17 +40,28 @@ tab_freq <- fluidPage(
     
     fluidRow(    
         column(3,
-               DTOutput("database_frequencies"),
+               DTOutput("database_frequencies")
+               ,
                verbatimTextOutput('row_selected')
                ),
         column(3,
                DTOutput("database_bigrams"),
-               verbatimTextOutput('row_selected_bigram'),
-               plotOutput("plot_frequencies")
+               verbatimTextOutput('row_selected_bigram')
+               # ,
+               # plotOutput("plot_frequencies")
                ),
         column(3,
-               DTOutput("database_brand_bigram_selected")
-               # verbatimTextOutput("database_brand_bigram_selected")
+               DTOutput("database_brand_bigram_selected"),
+               verbatimTextOutput("brand_selected")
+               ),
+        column(3, 
+               DTOutput("brand_selected_show"),
+               style = "height:500px; overflow-y: scroll;overflow-x: scroll;"
+               # hr(),
+               # hr(),
+               # verbatimTextOutput("brand_selected_show"),
+               # tags$head(tags$style("#brand_selected_show{font-size:12px; font-style:italic; overflow-x:scroll; height:180px; background: ghostwhite;}"))
+               # tags$head(tags$style("#brand_selected_show{color:red; font-size:12px; font-style:italic; overflow-y:scroll; max-height: 500px; background: ghostwhite;}"))
                )
         )
     )
@@ -137,7 +148,7 @@ server <- function(input, output, session) {
         )
     })
     
-    output$database_frequencies <- renderDT(
+    output$database_frequencies <- renderDataTable(
         database_frequencies()
     )
     
@@ -154,77 +165,123 @@ server <- function(input, output, session) {
             cat(frequencies() %>% dplyr::select(word) %>% dplyr::slice(word_selected()) %>% unlist, sep = ', ')
             }
         })
+        output$database_bigrams <- renderDataTable(
+            if(length(input$database_frequencies_rows_selected) == 0) {
+                
+            } else {
+                datatable_database_bigrams()
+            }
+        )
     })
 
-    output$plot_frequencies <- renderPlot({
-        tidy_books %>%
-            dplyr::count(word, sort = TRUE) %>%
-            dplyr::top_n(input$top_freq) %>%
-            dplyr::mutate(word = reorder(word, n)) %>%
-            ggplot2::ggplot(aes(n, word)) +
-            ggplot2::geom_col() +
-            ggplot2::labs(y = NULL)
-    })
+    # output$plot_frequencies <- renderPlot({
+    #     tidy_books %>%
+    #         dplyr::count(word, sort = TRUE) %>%
+    #         dplyr::top_n(input$top_freq) %>%
+    #         dplyr::mutate(word = reorder(word, n)) %>%
+    #         ggplot2::ggplot(aes(n, word)) +
+    #         ggplot2::geom_col() +
+    #         ggplot2::labs(y = NULL)
+    # })
     
     database_bigrams <- reactive({
         word1_selected <- frequencies() %>% dplyr::select(word) %>% dplyr::slice(word_selected()) %>% unlist
-        
+
         bigrams_filtered %>%
             dplyr::filter(word1 %in% word1_selected) %>%
             dplyr::count(word1, word2, sort = T) %>%
             dplyr::mutate(n = NULL)
     })
-    
+
     datatable_database_bigrams <- reactive({
         # word1_selected <- frequencies() %>% dplyr::select(word) %>% dplyr::slice(word_selected()) %>% unlist
         datatable(
             database_bigrams(),
             selection = "single",
             rownames = F,
-            filter = "none", 
+            filter = "none",
             options = list(pageLength = input$top_freq, dom = 'tip'),
             caption = 'Bigram frequencies table'
         )
     })
-    
-    observeEvent(input$database_frequencies_rows_selected,{
-        
-        output$database_bigrams <- renderDataTable(
-            datatable_database_bigrams()
-        )
-    })
-    
+
     bigram_selected <- reactive({
         input$database_bigrams_rows_selected
     })
-    
+
     observeEvent(input$database_frequencies_rows_selected,{
-        
+
         output$row_selected_bigram <- renderPrint({
             cat('\n\nSelected rows:\n\n')
-            cat(database_bigrams() %>% dplyr::select(word2) %>% dplyr::slice(bigram_selected()) %>% unlist, sep = ', ')
+            if(length(input$database_bigrams_rows_selected) == 0) {
+                cat(' ')
+            } else {
+                cat(database_bigrams() %>% dplyr::select(word2) %>% dplyr::slice(bigram_selected()) %>% unlist, sep = ', ')
+                }
             })
-        output$database_brand_bigram_selected <- renderDataTable(datatable_brand_bigram_selected())
+        output$database_brand_bigram_selected <- renderDataTable(
+            if(length(input$database_bigrams_rows_selected) == 0) {
+                
+            } else {
+                datatable_brand_bigram_selected()
+            }
+        )
+        
         })
     
+    brand_selected <- reactive({
+        input$database_brand_bigram_selected_rows_selected
+    })
+    
+    observeEvent(input$database_frequencies_rows_selected, {
+        
+        output$brand_selected <- renderPrint({
+            cat('\n\nSelected rows:\n\n')
+            if(length(input$database_brand_bigram_selected_rows_selected) == 0) {
+                cat(' ')
+            } else {
+                cat(brand_bigram_selected() %>% dplyr::slice(input$database_brand_bigram_selected_rows_selected) %>% dplyr::pull(line) , sep = ', ')
+            }
+        })
+        output$brand_selected_show <- renderDataTable(
+            if(length(input$database_brand_bigram_selected_rows_selected) == 0) {
+
+            } else {
+                brand_to_filter <- brand_bigram_selected() %>% dplyr::slice(input$database_brand_bigram_selected_rows_selected) %>% dplyr::pull(line)
+
+                datatable(
+                    text_df %>%
+                        dplyr::filter(line == brand_to_filter) %>%
+                        dplyr::select(text),
+                    selection = "single",
+                    rownames = F,
+                    filter = "none",
+                    height = "80px",
+                    options = list(pageLength = input$top_freq, dom = 'tip'),
+                    caption = 'Brand description'
+                )
+            }
+        )
+    })
+
      brand_bigram_selected <- reactive({
         word1_sel <- frequencies() %>% dplyr::select(word) %>% dplyr::slice(word_selected()) %>% unlist
         word2_sel <- database_bigrams() %>% dplyr::select(word2) %>% dplyr::slice(bigram_selected()) %>% unlist
-        
+
         bigrams_filtered %>%
             dplyr::filter(word1 == word1_sel, word2 == word2_sel) %>%
             dplyr::count(line) %>%
             dplyr::select(line)
     })
-    
+
     datatable_brand_bigram_selected <- reactive({
         datatable(
             brand_bigram_selected(),
             selection = "single",
             rownames = F,
-            filter = "none", 
+            filter = "none",
             options = list(pageLength = input$top_freq, dom = 'tip'),
-            caption = 'Unigram frequencies table'
+            caption = 'Filtered brands'
             )
         })
 
