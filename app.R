@@ -81,6 +81,8 @@ server <- function(input, output, session) {
         dplyr::mutate(lemma = trimws(lemma),
                       word = trimws(word)) %>%
         dplyr::as_tibble()
+    verbi <- readxl::read_xlsx("./data/verbi.xlsx") %>%
+        dplyr::as_tibble()
     
     #---- data manipulation
     
@@ -93,9 +95,11 @@ server <- function(input, output, session) {
     
     tidy_books <- tidy_books %>%
         dplyr::anti_join(., stopwords_IT2, by = c("word" = "stopwords_IT")) %>%
-        dplyr::anti_join(tm_stopwords) %>%
-        dplyr::anti_join(stopword_brand, by = c("word" = "stopword_brand")) %>%
-        dplyr::anti_join(lemma)
+        dplyr::anti_join(tm_stopwords) 
+    # %>%
+    #     dplyr::anti_join(stopword_brand, by = c("word" = "stopword_brand")) %>%
+    #     dplyr::anti_join(lemma) %>%
+    #     dplyr::anti_join(verbi)
 
     biagram <- text_df %>%
         dplyr::mutate(line = trimws(line)) %>%
@@ -105,16 +109,18 @@ server <- function(input, output, session) {
         tidyr::separate(bigram, c("word1", "word2"), sep = " ")
     
     bigrams_filtered <- bigrams_separated %>%
-        dplyr::filter(!word1 %in% stopword_brand$stopword_brand) %>%
-        dplyr::filter(!word2 %in% stopword_brand$stopword_brand) %>%
+        # dplyr::filter(!word1 %in% stopword_brand$stopword_brand) %>%
+        # dplyr::filter(!word2 %in% stopword_brand$stopword_brand) %>%
         dplyr::filter(!word1 %in% stopwords_IT2$stopwords_IT) %>%
         dplyr::filter(!word2 %in% stopwords_IT2$stopwords_IT) %>%
-        dplyr::filter(!word1 %in% tidytext::stop_words) %>%
-        dplyr::filter(!word2 %in% tidytext::stop_words) %>%
+        # dplyr::filter(!word1 %in% tidytext::stop_words) %>%
+        # dplyr::filter(!word2 %in% tidytext::stop_words) %>%
         dplyr::filter(!word1 %in% tm_stopwords) %>%
         dplyr::filter(!word2 %in% tm_stopwords) %>%
         dplyr::filter(!word1 %in% lemma$word) %>%
-        dplyr::filter(!word2 %in% lemma$word)
+        dplyr::filter(!word2 %in% lemma$word) %>%
+        dplyr::filter(!word1 %in% verbi$word) %>%
+        dplyr::filter(!word2 %in% verbi$word)
 
     #---- tab_database_original
     
