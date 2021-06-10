@@ -18,6 +18,88 @@ text_df <- readRDS("./data/text_df.rds")
 
 tipo_abbigliamento_tag <- readRDS("./data/tipo_abbigliamento_tag.rds")
 
+# text_df %>%
+#   dplyr::left_join(., tipo_abbigliamento_tag) %>% 
+#   dplyr::group_by(line, text, attribute) %>%
+#   dplyr::ungroup() %>%
+#   dplyr::select(-text) %>% 
+#   dplyr::distinct() %>%                   # join POS
+#   dplyr::count(attribute) %>%                                    # count
+#   dplyr::filter(!is.na(attribute)) %>%
+#   dplyr::mutate(prop=n/sum(n))
+# 
+# text_df %>%
+#   dplyr::left_join(., tipo_abbigliamento_tag) %>% 
+#   dplyr::group_by(line, text, attribute) %>%
+#   dplyr::ungroup() %>%
+#   dplyr::select(-text) %>% 
+#   dplyr::distinct() %>%                   # join POS
+#   dplyr::count(line, attribute) %>%                                    # count
+#   dplyr::filter(!is.na(attribute)) %>%
+#   dplyr::mutate(prop=n/sum(n)) %>%
+#   ggplot2::ggplot(aes(attribute, prop)) + 
+#   geom_boxplot() + 
+#   coord_flip()
+# 
+# text_df %>%
+#   dplyr::left_join(., tipo_abbigliamento_tag) %>% 
+#   dplyr::group_by(line, text, attribute) %>%
+#   dplyr::ungroup() %>%
+#   dplyr::select(-text) %>% 
+#   dplyr::distinct() %>%                   # join POS
+#   dplyr::count(line, attribute) %>%                                    # count
+#   dplyr::filter(!is.na(attribute)) %>%
+#   dplyr::group_by(line) %>%
+#   dplyr::summarise(total = sum(n))
+  
+text_df %>%
+  dplyr::left_join(., tipo_abbigliamento_tag) %>% 
+  dplyr::group_by(line, text, attribute) %>%
+  dplyr::ungroup() %>%
+  dplyr::select(-text) %>% 
+  dplyr::distinct() %>%                   # join POS
+  dplyr::count(line, attribute) %>%                                    # count
+  dplyr::filter(!is.na(attribute)) %>%
+  dplyr::left_join(text_df %>%
+                     dplyr::left_join(., tipo_abbigliamento_tag) %>% 
+                     dplyr::group_by(line, text, attribute) %>%
+                     dplyr::ungroup() %>%
+                     dplyr::select(-text) %>% 
+                     dplyr::distinct() %>%                   # join POS
+                     dplyr::count(line, attribute) %>%                                    # count
+                     dplyr::filter(!is.na(attribute)) %>%
+                     dplyr::group_by(line) %>%
+                     dplyr::summarise(total = sum(n))) %>%
+  dplyr::mutate(prop=n/total) %>%
+  ggplot2::ggplot(aes(attribute, prop)) + 
+  geom_boxplot() + 
+  coord_flip()
+
+text_df %>%
+  dplyr::left_join(., tipo_abbigliamento_tag) %>% 
+  dplyr::group_by(line, text, attribute) %>%
+  dplyr::ungroup() %>%
+  dplyr::select(-text) %>% 
+  dplyr::distinct() %>%                   # join POS
+  dplyr::count(word, attribute) %>%                                    # count
+  dplyr::filter(!is.na(attribute)) %>%
+  dplyr::left_join(text_df %>%
+                     dplyr::left_join(., tipo_abbigliamento_tag) %>% 
+                     dplyr::group_by(line, text, attribute) %>%
+                     dplyr::ungroup() %>%
+                     dplyr::select(-text) %>% 
+                     dplyr::distinct() %>%                   # join POS
+                     dplyr::count(line, attribute) %>%                                    # count
+                     dplyr::filter(!is.na(attribute)) %>%
+                     dplyr::group_by(line) %>%
+                     dplyr::summarise(total = sum(n))) %>%
+  dplyr::mutate(prop=n/total) %>%
+  ggplot2::ggplot(aes(attribute, prop)) + 
+  geom_boxplot() + 
+  coord_flip()
+
+
+
 text_df_tipo_abbigliamento_tag <- text_df %>%
   dplyr::left_join(., tipo_abbigliamento_tag) %>% 
   dplyr::group_by(line, text, attribute) %>%

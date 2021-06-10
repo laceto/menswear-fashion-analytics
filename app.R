@@ -11,6 +11,7 @@ library(ggplot2)
 library(dplyr)
 library(forcats)
 library(tidyr)
+library(tidyverse)
 
 header <- dashboardHeader(
     
@@ -76,7 +77,9 @@ server <- function(input, output, session) {
     
     text_df <- readRDS("./data/text_df.rds")
     stopwords_IT2 <- read.table("./data/stopwords IT.txt", header = T, sep = "\t")
-    tm_stopwords <- tibble(word = tm::stopwords("it"))
+    word <- tm::stopwords("it")
+    tm_stopwords <- tibble::as_tibble(word) %>%
+        dplyr::rename(word = value)
     lemma <- read.csv("./data/lemmatizzazione_IT.txt", header = T, sep = "\t", fill = T) %>%
         dplyr::mutate(lemma = trimws(lemma),
                       word = trimws(word)) %>%
@@ -91,15 +94,15 @@ server <- function(input, output, session) {
     
     stopword_brand <- text_df$line %>% unlist %>% trimws() %>% str_split(., "\\s+")
     stopword_brand <- stopword_brand %>% unlist()
-    stopword_brand <- tibble(stopword_brand = stopword_brand)
+    stopword_brand <- tibble::as_tibble(stopword_brand) %>%
+        dplyr::rename(stopword_brand = value)
     
     tidy_books <- tidy_books %>%
         dplyr::anti_join(., stopwords_IT2, by = c("word" = "stopwords_IT")) %>%
-        dplyr::anti_join(tm_stopwords) 
-    # %>%
-    #     dplyr::anti_join(stopword_brand, by = c("word" = "stopword_brand")) %>%
-    #     dplyr::anti_join(lemma) %>%
-    #     dplyr::anti_join(verbi)
+        dplyr::anti_join(tm_stopwords) %>%
+        dplyr::anti_join(stopword_brand, by = c("word" = "stopword_brand")) %>%
+        dplyr::anti_join(lemma) %>%
+        dplyr::anti_join(verbi)
 
     biagram <- text_df %>%
         dplyr::mutate(line = trimws(line)) %>%

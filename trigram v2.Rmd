@@ -1,0 +1,923 @@
+---
+title: "TM Fashion"
+output:
+  html_document:
+    code_folding: show
+    highlight: tango
+    keep_md: no
+    number_sections: yes
+    theme: united
+    toc: yes
+    toc_float: yes
+  github_document:
+    toc: yes
+  pdf_document:
+    toc: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = FALSE,
+  include = FALSE,
+  warning = FALSE, 
+  comment = FALSE
+  )
+```
+
+```{r}
+library(tm)
+library(tibble)
+library(dplyr)
+library(tidytext)
+library(stringr)
+library(ggplot2)
+library(igraph)
+library(networkD3)
+library(magrittr)
+library(glue)
+library(cowplot)
+library(widyr)
+library(ggthemes)
+library(viridis)
+library(topicmodels)
+library(wordcloud)
+library(DT)
+library(kableExtra)
+library(forcats)
+library(quanteda)
+library(quanteda.textplots)
+```
+# The project  
+
+This page presents the final projects of the Text Mining course. The aim of this report is to put in practice the theory learned during the course. 
+
+# Explore the data   
+
+The corpus consists of a Collection of fashions brand description which was scraped from [shoppingmap.it](www.shoppingmap.it).  
+
+```{r}
+text_df <- readRDS("./data/text_df.rds")
+```
+
+```{r, include=TRUE}
+# text_df%>%
+#   kable(., align = "c") %>%
+#   kable_styling(full_width = T) %>%
+#   scroll_box(width = "750px", height = "400px")
+
+text_df <- text_df %>%
+  dplyr::mutate(l = nchar(text),
+                w = str_count(text, "\\S+"))
+
+DT::datatable(text_df, class = 'cell-border stripe')
+  
+```
+
+## Distribution of characters  
+
+
+```{r, include=TRUE}
+
+text_df %>%
+  ggplot(aes(l)) +
+  geom_histogram(bins = 30) +
+  scale_x_log10() +
+  ylab("character count") +
+  xlab("character")
+
+```
+
+## Distribution of words  
+
+
+```{r, include=TRUE}
+
+text_df %>%
+  ggplot(aes(w)) +
+  geom_histogram(bins = 30) +
+  scale_x_log10() +
+  ylab("word count") +
+  xlab("word")
+
+```
+
+# Pre-processing  
+
+To work with this corpus as a tidy dataset, we restructured it as one-token-per-row format.  
+
+Text cleaning was performed by:  
+
+- filtering out brands for which the description contains less then 10 words  
+- removing stopwords
+- removing any words with numeric digits
+- removing any words with 3 or more repeated letters
+- removing any remaining single letter words  
+
+
+```{r}
+stopwords_IT2 <- read.table("./data/stopwords IT.txt", header = T, sep = "\t")
+tm_stopwords <- tibble::as_tibble(tm::stopwords("it")) %>%
+  dplyr::rename(word = value)
+stopwords_IT2 <- bind_rows(
+  stopwords_IT2,
+  tm_stopwords
+)
+tm_stopwords <- NULL
+
+stopword_brand <- text_df$line %>% unlist %>% trimws() %>% str_split(., "\\s+")
+stopword_brand <- stopword_brand %>% unlist()
+stopword_brand <- tibble::as_tibble(stopword_brand) %>%
+  dplyr::rename(stopword_brand = value)
+
+verbi <- readxl::read_xlsx("./data/verbi.xlsx")
+```
+
+```{r}
+text_df <- text_df %>%
+  dplyr::filter(w > 10)
+
+tidy_books <- text_df %>%
+  unnest_tokens(word, text)
+```
+
+```{r}
+tidy_books <- tidy_books %>%
+  dplyr::anti_join(., stopwords_IT2, by = c("word" = "stopwords_IT")) %>%
+  dplyr::anti_join(stopword_brand, by = c("word" = "stopword_brand")) %>%
+  dplyr::anti_join(verbi, by = c("word" = "word")) %>%
+  dplyr::filter(
+    !str_detect(word, pattern = "[[:digit:]]"), # removes any words with numeric digits
+    !str_detect(word, pattern = "[[:punct:]]"), # removes any remaining punctuations
+    !str_detect(word, pattern = "(.)\\1{2,}"),  # removes any words with 3 or more repeated letters
+    !str_detect(word, pattern = "\\b(.)\\b")    # removes any remaining single letter words
+  )
+```
+
+# Exploratory Text Analysis and nGram  
+
+After tokenizing the corpus, the word count is calculated. By word count it is indicated the number of times each token occur in the corpus.  
+
+## Word count  
+
+```{r, include = TRUE}
+# word_counts <- tidy_books %>%
+#   dplyr::ungroup() %>%
+#   dplyr::count(word, sort = TRUE)
+# 
+# word_counts %>%
+#   ggplot(aes(n)) +
+#   geom_histogram(bins = 30) +
+#   scale_x_log10() +
+#   ylab("log count")
+```
+
+```{r, include = TRUE}
+word_counts <- tidy_books %>%
+  dplyr::count(word, sort = TRUE)
+
+# word_counts %>%
+#   kable(., align = "c") %>%
+#   kable_styling(full_width = T) %>%
+#     scroll_box(width = "500px", height = "200px")
+
+DT::datatable(word_counts, class = 'cell-border stripe')
+
+# word_counts %>%
+#   dplyr::filter(n == 1)
+```
+
+```{r, include=TRUE}
+word_counts %>%
+  ggplot(aes(n)) +
+  geom_histogram(bins = 30) +
+  scale_x_log10() +
+  ylab("log count") +
+  labs(title = "Word Distribution")
+```
+
+## Bigram and Trigram count   
+
+In addition, bigram and trigram are calculated.  
+A bigram is a sequence of two adjacent tokens while a trigram is a sequence of three adjacent tokens.  
+
+```{r}
+bigram <- text_df %>%
+  tidytext::unnest_tokens(bigram, text, token = "ngrams", n = 2)
+
+bigrams_separated <- bigram %>%
+  tidyr::separate(bigram, c("word1", "word2"), sep = " ")
+
+bigrams_filtered <- bigrams_separated %>%
+  dplyr::filter(!word1 %in% stopword_brand$stopword_brand) %>%
+  dplyr::filter(!word2 %in% stopword_brand$stopword_brand) %>%
+  dplyr::filter(!word1 %in% stopwords_IT2$stopwords_IT) %>%
+  dplyr::filter(!word2 %in% stopwords_IT2$stopwords_IT) %>%
+  filter(
+    !str_detect(word1, pattern = "[[:digit:]]"), # removes any words with numeric digits
+    !str_detect(word1, pattern = "[[:punct:]]"), # removes any remaining punctuations
+    !str_detect(word1, pattern = "(.)\\1{2,}"),  # removes any words with 3 or more repeated letters
+    !str_detect(word1, pattern = "\\b(.)\\b"),    # removes any remaining single letter words
+    !str_detect(word2, pattern = "[[:digit:]]"), # removes any words with numeric digits
+    !str_detect(word2, pattern = "[[:punct:]]"), # removes any remaining punctuations
+    !str_detect(word2, pattern = "(.)\\1{2,}"),  # removes any words with 3 or more repeated letters
+    !str_detect(word2, pattern = "\\b(.)\\b")    # removes any remaining single letter words
+  )
+```
+
+```{r, include=TRUE}
+bigrams_filtered %>%
+  tidyr::unite("bigram", c(word1, word2), sep = " ") %>%
+  dplyr::count(bigram, sort = T) %>%
+  DT::datatable(., class = 'cell-border stripe')
+```
+```{r, include=TRUE}
+bi.gram.count <- bigrams_filtered %>%
+  dplyr::count(word1, word2) %>% 
+  dplyr::rename(weight = n)
+
+bi.gram.count %>% 
+  ggplot(mapping = aes(x = weight)) +
+  theme_light() +
+  geom_histogram(bins = 30) +
+  labs(title = "Bigram Distribution") +
+  scale_x_log10() +
+  ylab("log count")
+```
+
+```{r}
+trigram <- text_df %>%
+  dplyr::ungroup() %>%
+  tidytext::unnest_tokens(trigram, text, token = "ngrams", n = 3)
+
+trigrams_separated <- trigram %>%
+  tidyr::separate(trigram, c("word1", "word2", "word3"), sep = " ")
+
+trigrams_filtered <- trigrams_separated %>%
+  dplyr::filter(!word1 %in% stopword_brand$stopword_brand) %>%
+  dplyr::filter(!word2 %in% stopword_brand$stopword_brand) %>%
+  dplyr::filter(!word3 %in% stopword_brand$stopword_brand) %>%
+  dplyr::filter(!word1 %in% stopwords_IT2$stopwords_IT) %>%
+  dplyr::filter(!word2 %in% stopwords_IT2$stopwords_IT) %>%
+  dplyr::filter(!word3 %in% stopwords_IT2$stopwords_IT) %>%
+  filter(
+    !str_detect(word1, pattern = "[[:digit:]]"), # removes any words with numeric digits
+    !str_detect(word1, pattern = "[[:punct:]]"), # removes any remaining punctuations
+    !str_detect(word1, pattern = "(.)\\1{2,}"),  # removes any words with 3 or more repeated letters
+    !str_detect(word1, pattern = "\\b(.)\\b"),    # removes any remaining single letter words
+    !str_detect(word2, pattern = "[[:digit:]]"), # removes any words with numeric digits
+    !str_detect(word2, pattern = "[[:punct:]]"), # removes any remaining punctuations
+    !str_detect(word2, pattern = "(.)\\1{2,}"),  # removes any words with 3 or more repeated letters
+    !str_detect(word2, pattern = "\\b(.)\\b"),    # removes any remaining single letter words
+    !str_detect(word3, pattern = "[[:digit:]]"), # removes any words with numeric digits
+    !str_detect(word3, pattern = "[[:punct:]]"), # removes any remaining punctuations
+    !str_detect(word3, pattern = "(.)\\1{2,}"),  # removes any words with 3 or more repeated letters
+    !str_detect(word3, pattern = "\\b(.)\\b")    # removes any remaining single letter words
+  )
+
+```
+
+```{r, include=TRUE}
+trigrams_filtered %>%
+  tidyr::unite("trigram", c(word1, word2, word3), sep = " ") %>%
+  dplyr::count(trigram, sort = T) %>%
+  DT::datatable(., class = 'cell-border stripe')
+```
+```{r, include=TRUE}
+trigram.count <- trigrams_filtered %>%
+  tidyr::unite("trigram", c(word1, word2, word3), sep = " ") %>%
+  dplyr::count(trigram, sort = T) %>% 
+  dplyr::rename(weight = n)
+
+trigram.count %>% 
+  ggplot(mapping = aes(x = weight)) +
+  theme_light() +
+  geom_histogram(bins = 30) +
+  labs(title = "Trigram Distribution") +
+  scale_x_log10() +
+  ylab("log count")
+```
+
+# Bigram Network Analysis  
+
+In this section it is visualized text data as a weighted network (graph) by counting pairwise relative occurence of bigrams.   
+
+```{r}
+# bi.gram.count %>% 
+#   mutate(weight = log(weight + 1)) %>% 
+#   ggplot(mapping = aes(x = weight)) +
+#   theme_light() +
+#   geom_histogram(bins = 30) +
+#   labs(title = "Bigram log-Weight Distribution")
+
+
+threshold <- 15
+
+# For visualization purposes we scale by a global factor. 
+ScaleWeight <- function(x, lambda) {
+  x / lambda
+}
+
+
+network <-  bi.gram.count %>%
+  filter(weight > threshold) %>%
+  mutate(weight = ScaleWeight(x = weight, lambda = 2E3)) %>% 
+  graph_from_data_frame(directed = FALSE)
+# network
+# 
+# is.weighted(network)
+```
+
+
+```{r}
+# plot(
+#   network, 
+#   vertex.size = 1,
+#   vertex.label.color = 'black', 
+#   vertex.label.cex = 0.7, 
+#   vertex.label.dist = 1,
+#   edge.color = 'gray', 
+#   main = 'Bigram Count Network', 
+#   sub = glue('Weight Threshold: {threshold}'), 
+#   alpha = 50
+# )
+```
+
+```{r, include=TRUE}
+# Store the degree.
+V(network)$degree <- strength(graph = network)
+# strength(graph = network) %>% length()
+
+# Compute the weight shares.
+E(network)$width <- E(network)$weight/max(E(network)$weight)
+# length(E(network)$weight/max(E(network)$weight))
+
+
+plot(
+  network, 
+  vertex.color = 'lightblue',
+  # Scale node size by degree.
+  vertex.size = 2*V(network)$degree,
+  vertex.label.color = 'black', 
+  vertex.label.cex = 0.6, 
+  vertex.label.dist = 1.6,
+  edge.color = 'gray', 
+  # Set edge width proportional to the weight relative value.
+  edge.width = 3*E(network)$width ,
+  main = 'Bigram Count Network', 
+  sub = glue('Count Threshold: {threshold}'), 
+  alpha = 50
+)
+```
+
+The biggest connected component of the network is extracted.  
+
+```{r, include=TRUE}
+# Get all connected components.
+# clusters(graph = network)
+
+
+# Select biggest connected component.  
+V(network)$cluster <- clusters(graph = network)$membership
+# length(clusters(graph = network)$membership)
+
+
+cc.network <- induced_subgraph(
+  graph = network,
+  vids = which(V(network)$cluster == which.max(clusters(graph = network)$csize))
+)
+
+# cc.network 
+
+# Store the degree.
+V(cc.network)$degree <- strength(graph = cc.network)
+# length(V(cc.network)$degree)
+
+# Compute the weight shares.
+E(cc.network)$width <- E(cc.network)$weight/max(E(cc.network)$weight)
+# length(E(cc.network)$width)
+
+plot(
+  cc.network, 
+  vertex.color = 'lightblue',
+  # Scale node size by degree.
+  vertex.size = 10*V(cc.network)$degree,
+  vertex.label.color = 'black', 
+  vertex.label.cex = 0.6, 
+  vertex.label.dist = 1.6,
+  edge.color = 'gray', 
+  # Set edge width proportional to the weight relative value.
+  edge.width = 3*E(cc.network)$width ,
+  main = 'Bigram Count Network (Biggest Connected Component)', 
+  sub = glue('Count Threshold: {threshold}'), 
+  alpha = 50
+)
+```
+
+A dynamic visualization of the network is made by using the networkD3 library.  
+
+```{r, include=TRUE}
+
+network <-  bi.gram.count %>%
+  filter(weight > threshold) %>%
+  graph_from_data_frame(directed = FALSE)
+
+# Store the degree.
+V(network)$degree <- strength(graph = network)
+# length(strength(graph = network))
+# Compute the weight shares.
+E(network)$width <- E(network)$weight/max(E(network)$weight)
+# length(E(network)$width)
+
+# Create networkD3 object.
+network.D3 <- igraph_to_networkD3(g = network)
+# Define node size.
+network.D3$nodes %<>% mutate(Degree = (1E-2)*V(network)$degree)
+# length(network.D3$nodes)
+# Degine color group (I will explore this feature later).
+network.D3$nodes %<>% mutate(Group = 1)
+# Define edges width. 
+network.D3$links$Width <- 10*E(network)$width
+
+forceNetwork(
+  Links = network.D3$links, 
+  Nodes = network.D3$nodes, 
+  Source = 'source', 
+  Target = 'target',
+  NodeID = 'name',
+  Group = 'Group', 
+  opacity = 0.9,
+  Value = 'Width',
+  Nodesize = 'Degree', 
+  # We input a JavaScript function.
+  linkWidth = JS("function(d) { return Math.sqrt(d.value); }"), 
+  fontSize = 12,
+  zoom = TRUE, 
+  opacityNoHover = 1
+)
+```
+
+Some metrics of node importance in a network such as degree centrality, closeness centrality, and betweenness centrality are derived.
+The nodes are ranked with respect to these centrality measures.  
+
+Degree is a simple centrality measure that counts how many neighbors a node has.  
+Closeness centrality of a node is a measure of centrality of the network, calculated as the reciprocal of the sum of the length of the shortest paths between the node and all other nodes in the graph. Thus, the more central a node is, the closer it is to all other nodes.  
+
+Betweenness centrality measures how often a node occurs on all shortest paths between two nodes.  
+
+```{r, include=TRUE}
+# Compute the centrality measures for the biggest connected component from above.
+node.impo.df <- tibble(
+  word = V(cc.network)$name,  
+  degree = strength(graph = cc.network),
+  closeness = closeness(graph = cc.network), 
+  betweenness = betweenness(graph = cc.network)
+)
+
+node.impo.df %>%
+  dplyr::select(word, degree) %>%
+  arrange(- degree) %>%
+  head(10) %>%
+  DT::datatable(., class = 'cell-border stripe')
+```
+
+
+
+```{r, include=TRUE}
+node.impo.df %>%
+    dplyr::select(word, closeness) %>%
+  arrange(- closeness) %>%
+  head(10) %>%
+  DT::datatable(., class = 'cell-border stripe')
+```
+
+
+```{r, include=TRUE}
+node.impo.df %>%
+      dplyr::select(word, betweenness) %>%
+  arrange(- betweenness) %>%
+  head(10) %>%
+  DT::datatable(., class = 'cell-border stripe')
+```
+
+The following plot shows the distribution of these centrality measures.
+
+```{r, include=TRUE}
+
+plt.deg <- node.impo.df %>% 
+  ggplot(mapping = aes(x = degree)) +
+  theme_light() +
+  geom_histogram(fill = 'blue', alpha = 0.8, bins = 30)
+
+plt.clo <- node.impo.df %>% 
+  ggplot(mapping = aes(x = closeness)) +
+  theme_light() +
+  geom_histogram(fill = 'red', alpha = 0.8, bins = 30)
+
+plt.bet <- node.impo.df %>% 
+  ggplot(mapping = aes(x = betweenness)) +
+  theme_light() +
+  geom_histogram(fill = 'green4', alpha = 0.8, bins = 30)
+
+plot_grid(
+  ... = plt.deg, 
+  plt.clo, 
+  plt.bet, 
+  ncol = 1, 
+  align = 'v'
+)
+```
+
+## Community detection  
+
+Louvain Method for community detection was applied to find clusters within the network.  
+42 groups where identified and the modularity is 0.92 (which is good, as it is close to 1).
+
+```{r, include=TRUE}
+
+
+comm.det.obj <- cluster_louvain(
+  graph = network, 
+  weights = E(network)$weight
+)
+
+```
+
+
+```{r, include=TRUE}
+# glimpse(comm.det.obj)
+# comm.det.obj[[2]]
+# sizes(comm.det.obj)
+# 
+# cc.network %>% glimpse()
+
+V(network)$membership <- membership(comm.det.obj)
+
+
+# length(membership(comm.det.obj))
+# class(V(cc.network))
+# sizes(comm.det.obj)
+# sizes(comm.det.obj)
+# 
+# We use the membership label to color the nodes.
+# network.D3$Group %>% dplyr::count(source)
+network.D3$nodes$Group <- V(network)$membership
+# dim(network.D3$nodes)
+
+forceNetwork(
+  Links = network.D3$links, 
+  Nodes = network.D3$nodes, 
+  Source = 'source', 
+  Target = 'target',
+  NodeID = 'name',
+  Group = 'Group', 
+  opacity = 0.9,
+  Value = 'Width',
+  Nodesize = 'Degree', 
+  # We input a JavaScript function.
+  linkWidth = JS("function(d) { return Math.sqrt(d.value); }"), 
+  fontSize = 12,
+  zoom = TRUE, 
+  opacityNoHover = 10
+)
+
+```
+
+
+```{r}
+# The idea of tf-idf is to find the important words for the content of each document by decreasing the weight for commonly used words and increasing the weight for words # that are not used very much in a collection or corpus of documents. Calculating tf-idf attempts to find the words that are important (i.e., common) in a text, but not too common. 
+
+# Compute TF-IDF using "word" as term and "screen_name" as document
+
+word_counts <- tidy_books %>%
+  dplyr::count(line, word, sort = TRUE)
+# 
+# word_counts  %>%
+#   dplyr::count(word, sort = TRUE) %>%
+#   head(16) %>%
+#   mutate(word = reorder(word, n)) %>%
+#   ggplot(aes(word, n)) +
+#   geom_col() +
+#   coord_flip() +
+#   labs(y = "# of uses among staff Twitter accounts")
+
+# Compute TF-IDF using "word" as term and "screen_name" as document
+word_tf_idf <- word_counts %>%
+  bind_tf_idf(word, line, n) %>%
+  arrange(desc(tf_idf))
+
+plot_word_tf_idf <- word_tf_idf %>%
+  dplyr::arrange((tf_idf)) %>%
+  dplyr::mutate(word = forcats::fct_reorder(word, n)) %>%
+  head(20)
+
+
+
+
+# 
+# ggplot(plot_word_tf_idf, aes(tf_idf, word)) +
+#         geom_bar(stat = "identity") +
+#         labs(title = "Highest tf-idf words in Jane Austen's Novels",
+#              y = NULL, x = "tf-idf") +
+#         theme_tufte(base_family = "Arial", base_size = 13, ticks = FALSE) +
+#         scale_alpha_continuous(range = c(0.6, 1), guide = FALSE) +
+#         scale_x_continuous(expand=c(0,0)) +
+#         scale_fill_viridis(end = 0.85, discrete=TRUE) +
+#         theme(legend.title=element_blank()) +
+#         theme(legend.justification=c(1,0), legend.position=c(1,0))
+# 
+# plot_word_tf_idf %>%
+#   group_by(line) %>%
+#   slice_max(tf_idf, n = 15) %>%
+#   ungroup() %>%
+#   ggplot(aes(tf_idf, fct_reorder(word, tf_idf), fill = line)) +
+#   geom_col(show.legend = FALSE) +
+#   facet_wrap(~line, ncol = 2, scales = "free") +
+#   labs(x = "tf-idf", y = NULL)
+
+# plot_word_tf_idf %>%
+#   group_by(word) %>%
+#   dplyr::summarise(tf_idf = mean(tf_idf)) %>%
+#   slice_max(tf_idf, n = 15) %>%
+#   ungroup() %>%
+#   ggplot(aes(tf_idf, fct_reorder(word, tf_idf))) +
+#   geom_col(show.legend = FALSE) +
+#   labs(x = "mean tf-idf", y = NULL)
+
+# c("lil", "rovers", "rcva", "fondatao")
+
+```
+
+```{r}
+# Notice that idf and thus tf-idf are zero for these extremely common words. These are all words that appear in all six of Jane Austen’s novels, so the idf term (which will then be the natural log of 1) is zero. The inverse document frequency (and thus tf-idf) is very low (near zero) for words that occur in many of the documents in a collection; this is how this approach decreases the weight for common words. The inverse document frequency will be a higher number for words that occur in fewer of the documents in the collection. Let’s look at terms with high tf-idf in Jane Austen’s works.
+
+# book_words %>%
+#   arrange(desc(n)) 
+```
+
+```{r}
+# word_important_bygroup <- function(brand, word_tf_idf, top){
+#   word_tf_idf %>%
+#     dplyr::filter(line %in% brand) %>%
+#     dplyr::group_by(line) %>%
+#     dplyr::top_n(top, tf_idf) %>%
+#     dplyr::ungroup() %>%
+#     dplyr::mutate(word = reorder_within(word, tf_idf, line))
+# }
+# 
+# word_important_bygroup("borriello", word_tf_idf)
+# 
+# word_important <- text_df %>%
+#   dplyr::pull(line) %>% 
+#   purrr::map_df(., word_important_bygroup, word_tf_idf, 10)
+
+```
+
+# Topic modelling  
+
+```{r}
+
+ AssociatedPress <- tidy_books %>%
+  dplyr::count(line, word) %>%
+  dplyr::rename(count = n) %>%
+  tidytext::cast_dtm(document = line, term = word, count)
+
+ # AssociatedPress <- bigrams_filtered %>%
+ #  tidyr::unite("word", c(word1, word2), sep = " ") %>%
+ #  dplyr::count(line, word) %>%
+ #  dplyr::rename(count = n) %>%
+ #  tidytext::cast_dtm(document = line, term = word, count)
+
+```
+
+```{r, include=TRUE}
+# set a seed so that the output of the model is predictable
+ap_lda <- LDA(AssociatedPress, k = 2, control = list(seed = 1234))
+
+
+# Notice that this has turned the model into a one-topic-per-term-per-row format. For each combination, the model computes the probability of that term being generated from that topic.
+ap_topics <- tidy(ap_lda, matrix = "beta")
+
+
+# We could use dplyr’s slice_max() to find the 10 terms that are most common within each topic. As a tidy data frame, this lends itself well to a ggplot2 visualization (Figure 6.2).
+ap_top_terms <- ap_topics %>%
+  group_by(topic) %>%
+  slice_max(beta, n = 10) %>% 
+  ungroup() %>%
+  arrange(topic, -beta)
+
+ap_top_terms %>%
+  mutate(term = reorder_within(term, beta, topic)) %>%
+  ggplot(aes(beta, term, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free") +
+  scale_y_reordered()
+```
+
+The most common words in topic 1 include “capi”, “qualita”, “tessuti”, and "mano" which suggests it may represent high-quality Clothing Brands.  
+Those most common in topic 2 include “designer”, “creazioni”, "stilista", "collezione" and “linee”, suggesting that this topic represents designer style. 
+
+We could consider the terms that had the greatest difference in β between topic 1 and topic 2. This can be estimated based on the log ratio of the two.  
+To constrain it to a set of especially relevant words, we can filter for relatively common words, such as those that have a β greater than 1/1000 in at least one topic.  
+
+```{r, include=TRUE}
+
+beta_wide <- ap_topics %>%
+  dplyr::mutate(topic = paste0("topic", topic)) %>%
+  tidyr::pivot_wider(names_from = topic, values_from = beta) %>% 
+  dplyr::filter(topic1 > .001 | topic2 > .001) %>%
+  dplyr::mutate(log_ratio = log2(topic2 / topic1))
+
+beta_wide %>% 
+  top_n(20, abs(log_ratio)) %>% 
+  ggplot(aes(y = fct_reorder(term, log_ratio),
+             x = log_ratio)) + 
+  geom_col() + 
+  labs(y = "",
+       x = "log ratio of phi between topic 2 and topic 1 (base 2)")
+
+```
+The words more common in topic 2 include words such as “originale”, "confort" and “tradizione”, as well as “pellami” and “cinture”. Topic 1 was more characterized by words like “raffinatezza” and “sartoriali”, as well as “tendenze”. This helps confirm that the two topics the algorithm identified were high quality and style. 
+
+```{r}
+# This visualization lets us understand the two topics that were extracted from the articles. The most common words in topic 1 include “percent”, “million”, “billion”, and “company”, which suggests it may represent business or financial news. Those most common in topic 2 include “president”, “government”, and “soviet”, suggesting that this topic represents political news. One important observation about the words in each topic is that some words, such as “new” and “people”, are common within both topics. This is an advantage of topic modeling as opposed to “hard clustering” methods: topics used in natural language could have some overlap in terms of words. As an alternative, we could consider the terms that had the greatest difference in β between topic 1 and topic 2. This can be estimated based on the log ratio of the two: (a log ratio is useful because it makes the difference symmetrical: β 2 being twice as large leads to a log ratio of 1, while β 1  being twice as large results in -1). To constrain it to a set of especially relevant words, we can filter for relatively common words, such as those that have a  β  greater than 1/1000 in at least one topic.
+
+```
+
+# Co-occurrence analysis   
+
+Co-occurrence analysis extract semantic links between words. 
+Top 350 co-occurrence are shown in the following plot.  
+
+```{r, include=TRUE}
+################matrice di cooccorrenza a partire da DTM e NETWORKPLOT
+ AssociatedPress <- tidy_books %>%
+  dplyr::count(line, word) %>%
+  dplyr::rename(count = n) %>%
+  tidytext::cast_dfm(document = line, term = word, count)
+
+
+DFM_01 <- dfm_weight(AssociatedPress, scheme = "boolean")
+cooc <- fcm(DFM_01)
+# dim(cooc)
+feat <- names(topfeatures(cooc, 350))
+new_cooc <- fcm_select(cooc, feat)
+# dim(new_cooc)
+
+# head(new_cooc)
+
+textplot_network(new_cooc,min_freq =70, omit_isolated = TRUE,
+                 edge_color = "#1F78B4", edge_alpha = 0.5, edge_size = 2,
+                 vertex_color = "#4D4D4D", vertex_size = 2,
+                 vertex_labelcolor = NULL, vertex_labelfont = NULL)
+
+
+
+# title_word_pairs <- tidy_books %>% 
+#   pairwise_count(word, line, sort = TRUE, upper = FALSE)
+# 
+# title_word_pairs
+# library(ggraph)
+# title_word_pairs %>%
+#   filter(n >= 100) %>%
+#   graph_from_data_frame() %>%
+#   ggraph(layout = "fr") +
+#   geom_edge_link(aes(edge_alpha = n, edge_width = n), edge_colour = "cyan4") +
+#   geom_node_point(size = 1) +
+#   geom_node_text(aes(label = name), repel = TRUE, 
+#                  point.padding = unit(0.1, "lines")) +
+#   theme_void()
+```
+
+# Pairwise Similarity  
+
+Cosine similarity of all pairs of brands are calculated and below there are some example of brand similarities.  
+
+
+```{r}
+# source("similarity function.R")
+# library(furrr)
+# 
+# plan(multisession, workers = 7)
+# 
+# brand <-  tidy_books %>%
+#   dplyr::count(line) %>%
+#   dplyr::pull(line)
+# 
+# par_wais_simil <- furrr::future_map(brand, ~ similarity_all(.x, op_ed_similarity, 0)) %>%
+#   purrr::keep(function(x) nrow(x) >= 1)
+# 
+# saveRDS(par_wais_simil, "./data/par_wais_simil.rds")
+
+par_wais_simil <- readRDS("./data/par_wais_simil.rds")
+
+```
+
+```{r, include=TRUE}
+
+# par_wais_simil %>%
+#   dplyr::bind_rows() %>%
+#   dplyr::count(item1) %>% view()
+#   unique() %>% sort
+find_simil <- c("alberto guardiani", "blauer", "borriello")
+
+par_wais_simil %>%
+  dplyr::bind_rows() %>%
+  dplyr::filter(item1 %in% find_simil) %>%
+  dplyr::group_by(item1) %>%
+  dplyr::top_n(10, similarity) %>%
+  dplyr::ungroup() %>%
+  dplyr::mutate(item2 = reorder_within(item2, similarity, item1)) %>%
+  ggplot(aes(item2, similarity, fill = item1)) +
+  geom_col(show.legend = FALSE) +
+  scale_x_reordered() +
+  coord_flip() +
+  facet_wrap(~ item1, scales = "free_y") +
+  labs(x = "",
+       # y = "TF-IDF vectors of this word for this user",
+       title = "pairwise similarity")
+
+find_simil <- c("moscot", "pantofola d oro", "briglia 1949")
+
+par_wais_simil %>%
+  dplyr::bind_rows() %>%
+  dplyr::filter(item1 %in% find_simil) %>%
+  dplyr::group_by(item1) %>%
+  dplyr::top_n(10, similarity) %>%
+  dplyr::ungroup() %>%
+  dplyr::mutate(item2 = reorder_within(item2, similarity, item1)) %>%
+  ggplot(aes(item2, similarity, fill = item1)) +
+  geom_col(show.legend = FALSE) +
+  scale_x_reordered() +
+  coord_flip() +
+  facet_wrap(~ item1, scales = "free_y") +
+  labs(x = "",
+       # y = "TF-IDF vectors of this word for this user",
+       title = "pairwise similarity")
+
+find_simil <- c("360cashmere", "borsalino", "lacoste")
+
+par_wais_simil %>%
+  dplyr::bind_rows() %>%
+  dplyr::filter(item1 %in% find_simil) %>%
+  dplyr::group_by(item1) %>%
+  dplyr::top_n(10, similarity) %>%
+  dplyr::ungroup() %>%
+  dplyr::mutate(item2 = reorder_within(item2, similarity, item1)) %>%
+  ggplot(aes(item2, similarity, fill = item1)) +
+  geom_col(show.legend = FALSE) +
+  scale_x_reordered() +
+  coord_flip() +
+  facet_wrap(~ item1, scales = "free_y") +
+  labs(x = "",
+       # y = "TF-IDF vectors of this word for this user",
+       title = "pairwise similarity")
+
+find_simil <- c("falke", "puma", "e marinella")
+
+par_wais_simil %>%
+  dplyr::bind_rows() %>%
+  dplyr::filter(item1 %in% find_simil) %>%
+  dplyr::group_by(item1) %>%
+  dplyr::top_n(10, similarity) %>%
+  dplyr::ungroup() %>%
+  dplyr::mutate(item2 = reorder_within(item2, similarity, item1)) %>%
+  ggplot(aes(item2, similarity, fill = item1)) +
+  geom_col(show.legend = FALSE) +
+  scale_x_reordered() +
+  coord_flip() +
+  facet_wrap(~ item1, scales = "free_y") +
+  labs(x = "",
+       # y = "TF-IDF vectors of this word for this user",
+       title = "pairwise similarity")
+
+find_simil <- c("save the duck", "k way", "sun 68")
+
+par_wais_simil %>%
+  dplyr::bind_rows() %>%
+  dplyr::filter(item1 %in% find_simil) %>%
+  dplyr::group_by(item1) %>%
+  dplyr::top_n(10, similarity) %>%
+  dplyr::ungroup() %>%
+  dplyr::mutate(item2 = reorder_within(item2, similarity, item1)) %>%
+  ggplot(aes(item2, similarity, fill = item1)) +
+  geom_col(show.legend = FALSE) +
+  scale_x_reordered() +
+  coord_flip() +
+  facet_wrap(~ item1, scales = "free_y") +
+  labs(x = "",
+       # y = "TF-IDF vectors of this word for this user",
+       title = "pairwise similarity")
+  
+```
+
+# Word Cloud  
+
+```{r, include=TRUE}
+
+set.seed(123)
+word_counts <- tidy_books %>%
+  dplyr::count(word, sort = TRUE)
+wordcloud(word_counts$word, word_counts$n, max.words=350, scale=c(4, .03), colors=brewer.pal(6, "Dark2"), random.order = FALSE)
+
+```
+

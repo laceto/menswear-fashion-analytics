@@ -47,6 +47,8 @@ remove_accent <- function(str){
 #---- data manipulation
 
 text_df <- tibble(line = marchi_info$name, text = marchi_info$description)
+
+
 # text_df <- text_df %>%
 #   dplyr::filter(stringr::str_detect(line, "giveness"))
 text_df <- text_df %>%
@@ -54,6 +56,7 @@ text_df <- text_df %>%
                 text = str_replace_all(text, "\\.", " "), 
                 line = str_replace_all(line, "\r*\n", " "),
                 text = str_replace_all(text, "\r*\n", " "),
+                text = str_remove_all(text, "\\b[A-Z][a-zA-Z]*\\b"),
                 line = trimws(tolower(line)),
                 text = trimws(tolower(text))) %>%
   dplyr::filter(!is.na(text), text != "") 
