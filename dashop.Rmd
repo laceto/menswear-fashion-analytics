@@ -1,0 +1,113 @@
+---
+title: "Iris K-Means Clustering"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    social: menu
+    source_code: embed
+runtime: shiny
+---
+
+```{r global, include=FALSE}
+# load data in 'global' chunk so it can be shared by all users of the dashboard
+library(readr)
+library(dplyr)
+library(shiny)
+library(flexdashboard)
+library(shinydashboard)
+library(glue)
+# data(iris)
+shops <- read.csv("geocoded.csv", sep=",") %>%
+  dplyr::mutate(province = stringr::str_replace_all(province, "ì", "i")) %>%
+  dplyr::select(province:lat)
+
+
+
+```
+
+
+```{r}
+
+selectedData <- reactive({
+  shops %>%
+    dplyr::filter(province == input$xcol)
+})
+
+
+
+
+```
+
+Column {.sidebar}
+-----------------------------------------------------------------------
+
+```{r}
+
+selectInput('xcol', 'X Variable', sort(unique(shops$province)))    
+
+```
+
+Row
+-----------------------------------------------------------------------
+
+### Downloads per sec (last 5 min) {.value-box}
+
+```{r}
+
+
+
+# Emit the download rate
+flexdashboard::valueBox(nrow(shops), " Total shops in Italy", icon = icon("list"), color = "warning")
+```
+
+### Total downloads
+
+```{r}
+# dlCount is a reactive expression that keeps track of the total
+# number of rows that have ever appeared through pkgStream.
+# dlCount <- downloadCount(pkgStream)
+# Emit the download count
+
+flexdashboard::renderValueBox({
+  
+  n <- reactive({
+    selectedData() %>%
+    nrow()
+  })
+  city <- reactive({
+    input$xcol
+  })
+    
+  flexdashboard::valueBox(n(), paste0("ciaone"), icon = icon("list"), color = "warning")
+})
+
+
+
+```
+
+### Unique users {.value-box}
+
+```{r}
+# usrCount is a reactive expression that keeps an approximate
+# count of all of the unique users that have been seen since the
+# app started.
+# usrCount <- userCount(pkgStream)
+# Emit the user count
+flexdashboard::valueBox(10, " Total value", icon = icon("list"), color = "warning")
+```
+
+Row
+-----------------------------------------------------------------------
+
+
+
+
+```{r}
+renderTable({
+  selectedData() %>%
+    head
+})
+
+
+```
+
