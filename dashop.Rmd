@@ -1,8 +1,8 @@
 ---
-title: "Iris K-Means Clustering"
+title: "Dashop"
 output: 
   flexdashboard::flex_dashboard:
-    orientation: rows
+    #orientation: rows
     social: menu
     source_code: embed
 runtime: shiny
@@ -16,11 +16,37 @@ library(shiny)
 library(flexdashboard)
 library(shinydashboard)
 library(glue)
+library(stringr)
+library(leaflet)
+library(htmltools)
+library(highcharter)
 # data(iris)
-shops <- read.csv("geocoded.csv", sep=",") %>%
-  dplyr::mutate(province = stringr::str_replace_all(province, "ì", "i")) %>%
-  dplyr::select(province:lat)
 
+
+shops <- readxl::read_excel("geocoded.xlsx") %>% 
+  dplyr::mutate(province = stringr::str_replace_all(province, "ì", "i"),
+                province = stringr::str_replace_all(province, "^Reggio Calabria$", "Reggio di Calabria"),
+                province = stringr::str_replace_all(province, "^RM$", "Roma"),
+                province = stringr::str_replace_all(province, "^TN$", "Trento"),
+                province = stringr::str_replace_all(province, "^VE$", "Venezia"),
+                province = stringr::str_replace_all(province, "^Città Metropolitana Di Venezia$", "Venezia"),
+                province = stringr::str_replace_all(province, "^Città Metropolitana Di Bologna$", "Bologna"),
+                province = stringr::str_replace_all(province, "^VI$", "Vicenza"),
+                province = stringr::str_replace_all(province, "^RA$", "Ragusa"),
+                province = stringr::str_replace_all(province, "^PU$", "Pesaro Urbino"),
+                province = stringr::str_replace_all(province, "^FC$", "Forli Cesena")) %>%
+  dplyr::select(province:lat) %>%
+  dplyr::filter(stringr::str_detect(province, "^(.?$|[^angolo].+)")) %>%
+  dplyr::filter(!is.na(lon)) %>%
+  dplyr::mutate_at(.vars = c("lon", "lat"), .funs = as.numeric)
+# %>%
+#   dplyr::count(province) %>%
+#   dplyr::arrange(province)
+# summary(shops)
+# shops %>%
+#   dplyr::filter(is.na(lon))
+load("./Data/Negozi.RData")
+load("./Data/shop_info.RData")
 
 
 ```
@@ -38,39 +64,40 @@ selectedData <- reactive({
 
 ```
 
+Shops by city  {data-orientation=rows}
+===================================== 
+
 Column {.sidebar}
 -----------------------------------------------------------------------
 
 ```{r}
 
-selectInput('xcol', 'X Variable', sort(unique(shops$province)))    
+selectInput('xcol', 'select a city', sort(unique(shops$province)))
+
+renderText({
+  "click on the marker to visualize more information about the shop"
+})
 
 ```
 
 Row
 -----------------------------------------------------------------------
 
-### Downloads per sec (last 5 min) {.value-box}
+### 
 
 ```{r}
 
-
-
-# Emit the download rate
 flexdashboard::valueBox(nrow(shops), " Total shops in Italy", icon = icon("list"), color = "warning")
 ```
 
-### Total downloads
+### 
 
 ```{r}
-# dlCount is a reactive expression that keeps track of the total
-# number of rows that have ever appeared through pkgStream.
-# dlCount <- downloadCount(pkgStream)
-# Emit the download count
 
 flexdashboard::renderValueBox({
   
-  n <- reactive({
+  req(input$xcol)
+  n_row_sel <- reactive({
     selectedData() %>%
     nrow()
   })
@@ -78,36 +105,168 @@ flexdashboard::renderValueBox({
     input$xcol
   })
     
-  flexdashboard::valueBox(n(), paste0("ciaone"), icon = icon("list"), color = "warning")
+  flexdashboard::valueBox(n_row_sel(), glue('Shops in {city()}'), icon = icon("list"), color = "warning")
 })
 
 
 
 ```
 
-### Unique users {.value-box}
 
-```{r}
-# usrCount is a reactive expression that keeps an approximate
-# count of all of the unique users that have been seen since the
-# app started.
-# usrCount <- userCount(pkgStream)
-# Emit the user count
-flexdashboard::valueBox(10, " Total value", icon = icon("list"), color = "warning")
-```
+<!-- Row -->
+<!-- ----------------------------------------------------------------------- -->
+
+
+<!-- ```{r} -->
+<!-- renderTable({ -->
+<!--   selectedData() -->
+<!-- }) -->
+
+
+<!-- ``` -->
 
 Row
 -----------------------------------------------------------------------
 
-
-
+### map
 
 ```{r}
-renderTable({
+
+descrizione <- descrizione %>% 
+  dplyr::bind_rows() %>%
+  dplyr::mutate(descrizione = stringr::str_remove(descrizione, "\n"),
+                descrizione = stringr::str_trim(descrizione)) %>%
+  dplyr::rename(shop_link = link)
+
+contatti <- contatti %>%
+  dplyr::bind_rows() %>%
+  dplyr::rename(contact_info = ".")
+
+contatti <- contatti %>%
+  dplyr::filter(
+    contact_info != "Contatti"
+  ) %>%
+  dplyr::mutate(
+    contact_type = if_else(stringr::str_detect(contact_info, "^\\+\\d{1,2}|^\\+\\s\\d{1,2}|^+\\d{1,3}\\s\\d+\\s\\d+|^(\\+\\d{1,2}\\s)?\\(?\\d{3}\\)?[\\s.-]?\\d{3}[\\s.-]?\\d{4}$|^(\\+0?1\\[\\s.-]?)?\\(?\\d{3}\\)?[\\[\\s.-]?.-]\\d{3}[\\[\\s.-]?.-]\\d{4}$"), "phone", 
+                           if_else(stringr::str_detect(contact_info, "^www"), "website", 
+                                   if_else(str_detect(contact_info, "\\b[_a-z0-9-]+(?:\\.[_a-z0-9-]+)*@[a-z0-9-]+(?:\\.[a-z0-9-]+)*\\.[a-z]{2,4}\\b"), "email", "address"))),
+    contact_info2 = stringr::str_remove(contact_info, "[^,\\d\\s][^,\\d]*$"),
+    contact_info2 = stringr::str_remove(contact_info2, "\\,(?!\\,)"),
+    country = stringr::str_extract(contact_info, "[^,\\d\\s][^,\\d]*$"),
+    city = stringr::str_extract(contact_info, "\\(([^]]+)\\).*"),
+    contact_info3 = stringr::str_replace(contact_info2, "\\(([^]]+)\\).*", ""),
+    contact_info3 = stringr::str_replace(contact_info3, "\\,", "")
+    ) %>%
+  tidyr::separate(city, into = c("city2", "country2"), sep = ",") %>%
+  dplyr::mutate(
+    province = stringr::str_replace_all(city2, "\\(|\\)", ""),
+    # contact_info4 = split_detect(province, contact_info3)
+    country2 = NULL
+    ) %>%
+  dplyr::filter(!is.na(country))
+
+email <- contatti %>%
+  dplyr::filter(contact_type == "email") %>%
+  dplyr::select(contact_info, link) %>%
+  dplyr::rename(shop_link = link)
+
+marchi <- marchi %>%
+  dplyr::bind_rows() %>%
+  dplyr::rename(brand = ".",
+                shop_link = link) %>%
+  dplyr::select(brand, shop_link, negozio) %>%
+  dplyr::group_by(shop_link, negozio) %>%
+  dplyr::summarise(brands = paste0(brand, collapse = ","))
+
+
+joined_data <- reactive({
   selectedData() %>%
-    head
+    dplyr::left_join(marchi %>% 
+                       dplyr::count(shop_link, negozio, brands, sort = T)) %>%
+    dplyr::left_join(email) %>%
+    dplyr::left_join(descrizione) %>%
+    dplyr::rename(
+      long = lon
+    )
 })
 
 
+output$map <- renderLeaflet({
+  joined_data() %>%
+
+  leaflet(.) %>%
+    addTiles() %>% 
+    addMarkers(
+      label = ~htmlEscape(negozio),
+      layerId = ~negozio
+    )
+  })
+
+leafletOutput('map')  
+ 
+```
+
+Row 
+-----------------------------------------------------------------------
+
+### shop description
+
+```{r}
+
+click_marker <- eventReactive(input$map_marker_click, {
+
+  x <- input$map_marker_click
+
+  return(x$id)
+
+})
+
+data_for_chart <- reactive({
+
+  return(joined_data()[joined_data()$negozio == click_marker(), ])
+
+})
+
+# renderTable({
+#   data_for_chart() %>%
+#     dplyr::select(brands) %>%
+#     dplyr::filter(!is.na(brands))
+# })
+
+renderText({
+  data_for_chart() %>%
+    dplyr::select(descrizione) %>%
+    dplyr::filter(!is.na(descrizione)) %>%
+    dplyr::pull()
+})
+
+
+# observeEvent(input$map_marker_click, { 
+#     p <- input$map_marker_click
+#     print(p)
+#   })
+# 
+# names_selected <- reactive({
+#     p$id
+#   })
+# 
+#   renderText({
+#     names_selected()
+#   })
+  
+
+```
+
+-----------------------------------------------------------------------
+
+### brands
+
+```{r}
+renderText({
+  data_for_chart() %>%
+    dplyr::select(brands) %>%
+    dplyr::filter(!is.na(brands)) %>%
+    dplyr::pull()
+})
 ```
 
